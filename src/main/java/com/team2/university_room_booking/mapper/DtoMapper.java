@@ -1,8 +1,9 @@
 package com.team2.university_room_booking.mapper;
 
-import com.team2.university_room_booking.dto.request.RegisterUserDto;
-import com.team2.university_room_booking.dto.response.UserDto;
-import com.team2.university_room_booking.model.User;
+
+import com.team2.university_room_booking.dto.request.*;
+import com.team2.university_room_booking.dto.response.*;
+import com.team2.university_room_booking.model.*;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Component;
 
@@ -20,5 +21,38 @@ public class DtoMapper {
 
     public UserDto toUserDto(User user) {
         return modelMapper.map(user, UserDto.class);
+    }
+
+    public Room toRoomEntity(RoomRequestDto dto) {
+        return modelMapper.map(dto, Room.class);
+    }
+
+    public RoomDto toRoomDto(Room room) {
+        return modelMapper.map(room, RoomDto.class);
+    }
+
+    public Building toBuildingEntity(CreateBuildingDto dto) {
+        return modelMapper.map(dto, Building.class);
+    }
+
+
+    public BuildingDto toBuildingDto(Building building) {
+        return modelMapper.map(building, BuildingDto.class);
+    }
+
+    public Department toDepartmentEntity(CreateDepartmentDto dto) {
+        return modelMapper.map(dto, Department.class);
+    }
+
+    public DepartmentDto toDepartmentDto(Department department) {
+        return modelMapper.map(department, DepartmentDto.class);
+    }
+
+    public RoomFeature toRoomFeatureEntity(CreateRoomFeatureDto dto) {
+        return modelMapper.map(dto, RoomFeature.class);
+    }
+
+    public RoomFeatureDto toRoomFeatureDto(RoomFeature roomFeature) {
+        return modelMapper.map(roomFeature, RoomFeatureDto.class);
     }
 }

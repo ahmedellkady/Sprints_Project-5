@@ -5,6 +5,7 @@ import com.team2.university_room_booking.enums.RoomType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.Set;
 
@@ -12,12 +13,14 @@ import java.util.Set;
 @AllArgsConstructor
 @Entity
 @Table(name = "rooms")
+@NoArgsConstructor
 public class Room {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String name;
+    @Enumerated(EnumType.STRING)
     private RoomType type;
     private int capacity;
     private boolean available = true;
