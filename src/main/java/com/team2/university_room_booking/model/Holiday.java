@@ -1,16 +1,17 @@
 package com.team2.university_room_booking.model;
 
-import java.time.LocalDateTime;
-
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 @AllArgsConstructor
 @Entity
 @Table(name = "holiday")
 public class Holiday {
-    
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

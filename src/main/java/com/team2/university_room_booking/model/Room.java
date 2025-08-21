@@ -1,19 +1,19 @@
 package com.team2.university_room_booking.model;
 
 
-import java.util.Set;
-
 import com.team2.university_room_booking.enums.RoomType;
-
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+import java.util.Set;
 
 @Data
 @AllArgsConstructor
 @Entity
 @Table(name = "rooms")
 public class Room {
-    
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,9 +28,9 @@ public class Room {
 
     @ManyToMany
     @JoinTable(
-        name = "room_features",
-        joinColumns = @JoinColumn(name = "room_id"),
-        inverseJoinColumns = @JoinColumn(name = "feature_id")
+            name = "room_features",
+            joinColumns = @JoinColumn(name = "room_id"),
+            inverseJoinColumns = @JoinColumn(name = "feature_id")
     )
     private Set<RoomFeature> features;
 }
