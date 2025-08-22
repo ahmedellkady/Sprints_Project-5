@@ -3,27 +3,28 @@ package com.team2.university_room_booking.service;
 import com.team2.university_room_booking.dto.request.CreateBookingRequestDto;
 import com.team2.university_room_booking.dto.response.TopRecurringRoomDto;
 import com.team2.university_room_booking.enums.BookingStatus;
-import com.team2.university_room_booking.model.Booking;
-import com.team2.university_room_booking.model.Room;
-import com.team2.university_room_booking.model.RoomFeature;
-import com.team2.university_room_booking.model.User;
+import com.team2.university_room_booking.exceptions.BadRequestException;
+import com.team2.university_room_booking.exceptions.InvalidLoginException;
+import com.team2.university_room_booking.exceptions.NotFoundException;
+import com.team2.university_room_booking.exceptions.ResourceConflictException;
+import com.team2.university_room_booking.model.*;
 import com.team2.university_room_booking.repository.BookingRepository;
+import com.team2.university_room_booking.repository.HolidayRepository;
 import com.team2.university_room_booking.repository.RoomRepository;
 import com.team2.university_room_booking.security.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import jakarta.servlet.http.HttpServletRequest;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -35,46 +36,20 @@ public class BookingService {
 
     private final BookingRepository bookingRepository;
     private final RoomRepository roomRepository;
+    private final HolidayRepository holidayRepository;
     private final CustomUserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
 
     @Transactional
     public Booking createBooking(CreateBookingRequestDto request) {
-        // Ensure the room exists
         Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Room not found"));
+                .orElseThrow(() -> new NotFoundException("Room not found"));
 
-        // Validate required features if provided
-        if (request.getRequiredFeatureIds() != null && !request.getRequiredFeatureIds().isEmpty()) {
-            Set<Long> roomFeatureIds = room.getFeatures() == null
-                    ? Set.of()
-                    : room.getFeatures().stream()
-                    .map(RoomFeature::getId)
-                    .collect(Collectors.toSet());
+        validateRequiredFeatures(request, room);
 
-            if (!roomFeatureIds.containsAll(request.getRequiredFeatureIds())) {
-                Set<Long> missing = new java.util.HashSet<>(request.getRequiredFeatureIds());
-                missing.removeAll(roomFeatureIds);
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "Room is missing required features: " + missing
-                );
-            }
-        }
+        checkForHolidayConflicts(request.getStartTime(), request.getEndTime());
+        checkForBookingConflicts(room.getId(), request.getStartTime(), request.getEndTime());
 
-        // Check for overlap with PENDING or APPROVED bookings
-        boolean overlaps = bookingRepository.existsByRoomIdAndStatusInAndStartTimeLessThanAndEndTimeGreaterThan(
-                room.getId(),
-                List.of(BookingStatus.PENDING, BookingStatus.APPROVED),
-                request.getEndTime(),
-                request.getStartTime()
-        );
-
-        if (overlaps) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested time overlaps with an existing booking");
-        }
-
-        // Resolve the current authenticated user
         User currentUser = resolveCurrentUser();
 
         Booking booking = new Booking();
@@ -88,15 +63,54 @@ public class BookingService {
         return bookingRepository.save(booking);
     }
 
+    private void checkForHolidayConflicts(LocalDateTime startTime, LocalDateTime endTime) {
+        List<Holiday> overlappingHolidays = holidayRepository.findOverlappingHolidays(startTime, endTime);
+        if (!overlappingHolidays.isEmpty()) {
+            String holidayNames = overlappingHolidays.stream()
+                    .map(Holiday::getName)
+                    .collect(Collectors.joining(", "));
+            throw new ResourceConflictException("Booking falls on a holiday: " + holidayNames);
+        }
+    }
+
+    private void checkForBookingConflicts(Long roomId, LocalDateTime startTime, LocalDateTime endTime) {
+        List<BookingStatus> conflictingStatuses = List.of(BookingStatus.PENDING, BookingStatus.APPROVED);
+        boolean overlaps = bookingRepository.existsByRoomIdAndStatusInAndStartTimeLessThanAndEndTimeGreaterThan(
+                roomId,
+                conflictingStatuses,
+                endTime,
+                startTime
+        );
+
+        if (overlaps) {
+            throw new ResourceConflictException("Requested time overlaps with an existing booking");
+        }
+    }
+
+    private void validateRequiredFeatures(CreateBookingRequestDto request, Room room) {
+        if (request.getRequiredFeatureIds() != null && !request.getRequiredFeatureIds().isEmpty()) {
+            Set<Long> roomFeatureIds = room.getFeatures() == null
+                    ? Set.of()
+                    : room.getFeatures().stream()
+                    .map(RoomFeature::getId)
+                    .collect(Collectors.toSet());
+
+            boolean hasAllFeatures = roomFeatureIds.containsAll(request.getRequiredFeatureIds());
+            if (!hasAllFeatures) {
+                Set<Long> missingFeatures = new java.util.HashSet<>(request.getRequiredFeatureIds());
+                missingFeatures.removeAll(roomFeatureIds);
+                throw new BadRequestException("Room is missing required features: " + missingFeatures);
+            }
+        }
+    }
+
     public List<TopRecurringRoomDto> getTopRecurringRoomsForUser(Long userId, int limit) {
         if (limit <= 0) {
             limit = 3;
         }
         Pageable pageable = PageRequest.of(0, limit);
-        List<com.team2.university_room_booking.repository.BookingRepository.RoomBookingCount> rows =
-                bookingRepository.findTopRoomsByUser(userId, pageable);
-        List<TopRecurringRoomDto> result =
-                new ArrayList<>(rows.size());
+        List<BookingRepository.RoomBookingCount> rows = bookingRepository.findTopRoomsByUser(userId, pageable);
+        List<TopRecurringRoomDto> result = new ArrayList<>(rows.size());
         for (BookingRepository.RoomBookingCount r : rows) {
             result.add(new TopRecurringRoomDto(r.getRoomId(), r.getCount()));
         }
@@ -106,17 +120,15 @@ public class BookingService {
     private User resolveCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "You must be logged in");
+            throw new InvalidLoginException("You must be logged in");
         }
 
         Object principal = auth.getPrincipal();
 
-        // 1) If principal IS the domain User, use it directly
         if (principal instanceof User user) {
             return user;
         }
 
-        // 2) Otherwise, try to get a username from the principal
         String username = null;
         if (principal instanceof UserDetails ud) {
             username = ud.getUsername();
@@ -124,7 +136,6 @@ public class BookingService {
             username = s;
         }
 
-        // 3) As a fallback, read the JWT from the request and extract the username
         if (username == null) {
             ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
             if (attrs != null) {
@@ -142,15 +153,14 @@ public class BookingService {
         }
 
         if (username == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unable to resolve current user from authentication");
+            throw new InvalidLoginException("Unable to resolve current user from authentication");
         }
 
-        // 4) Load domain User via user details service (it should return domain User)
         UserDetails loaded = userDetailsService.loadUserByUsername(username);
         if (loaded instanceof User u) {
             return u;
         }
 
-        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated principal is not a domain User");
+        throw new InvalidLoginException("Authenticated principal is not a domain User");
     }
 }
