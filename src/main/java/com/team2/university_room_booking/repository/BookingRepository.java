@@ -1,5 +1,6 @@
 package com.team2.university_room_booking.repository;
 
+import com.team2.university_room_booking.enums.BookingStatus;
 import com.team2.university_room_booking.model.Booking;
 
 import java.time.LocalDateTime;
