@@ -47,9 +47,6 @@ class BookingServiceTest {
     private HolidayRepository holidayRepository;
 
     @Mock
-    private CustomUserDetailsService userDetailsService;
-
-    @Mock
     private SecurityContext securityContext;
 
     @Mock
