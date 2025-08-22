@@ -87,7 +87,7 @@ public class BookingService {
     private Room selectAvailableRoomForRequest(CreateBookingRequestDto request) {
         List<Room> allRooms = roomRepository.findAll();
 
-        List<Room> candidates = roomRepository.findAll().stream()
+        List<Room> candidates = allRooms.stream()
                 .filter(Room::isAvailable)
                 .filter(r -> {
                     try {
