@@ -55,4 +55,12 @@ public class DtoMapper {
     public RoomFeatureDto toRoomFeatureDto(RoomFeature roomFeature) {
         return modelMapper.map(roomFeature, RoomFeatureDto.class);
     }
+
+    public Holiday toHolidayEntity(HolidayRequestDto dto) {
+        return modelMapper.map(dto, Holiday.class);
+    }
+
+    public HolidayDto toHolidayDto(Holiday holiday) {
+        return modelMapper.map(holiday, HolidayDto.class);
+    }
 }
