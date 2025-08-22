@@ -109,7 +109,7 @@ class BookingServiceTest {
 
     @Test
     void createBooking_HolidayConflict_ThrowsResourceConflictException() {
-        when(roomRepository.findById(1L)).thenReturn(Optional.of(testRoom));
+        // No need to stub roomRepository; method returns before accessing it
         Holiday holiday = new Holiday(1L, "Test Holiday", createBookingRequestDto.getStartTime(), createBookingRequestDto.getEndTime());
         when(holidayRepository.findOverlappingHolidays(any(), any())).thenReturn(List.of(holiday));
 
