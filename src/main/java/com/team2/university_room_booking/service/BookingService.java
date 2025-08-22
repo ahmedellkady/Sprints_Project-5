@@ -3,11 +3,12 @@ package com.team2.university_room_booking.service;
 import com.team2.university_room_booking.dto.request.CreateBookingRequestDto;
 import com.team2.university_room_booking.dto.response.TopRecurringRoomDto;
 import com.team2.university_room_booking.enums.BookingStatus;
-import com.team2.university_room_booking.exceptions.BadRequestException;
-import com.team2.university_room_booking.exceptions.InvalidLoginException;
-import com.team2.university_room_booking.exceptions.NotFoundException;
-import com.team2.university_room_booking.exceptions.ResourceConflictException;
-import com.team2.university_room_booking.model.*;
+import com.team2.university_room_booking.exceptions.*;
+import com.team2.university_room_booking.model.Booking;
+import com.team2.university_room_booking.model.Holiday;
+import com.team2.university_room_booking.model.Room;
+import com.team2.university_room_booking.model.RoomFeature;
+import com.team2.university_room_booking.model.User;
 import com.team2.university_room_booking.repository.BookingRepository;
 import com.team2.university_room_booking.repository.HolidayRepository;
 import com.team2.university_room_booking.repository.RoomRepository;
@@ -42,13 +43,26 @@ public class BookingService {
 
     @Transactional
     public Booking createBooking(CreateBookingRequestDto request) {
-        Room room = roomRepository.findById(request.getRoomId())
-                .orElseThrow(() -> new NotFoundException("Room not found"));
-
-        validateRequiredFeatures(request, room);
-
+        // Always validate against holidays first
         checkForHolidayConflicts(request.getStartTime(), request.getEndTime());
-        checkForBookingConflicts(room.getId(), request.getStartTime(), request.getEndTime());
+
+        // Resolve the room based on the provided parameters
+        Room room;
+        if (request.getRoomId() != null) {
+            // Explicit room booking
+            room = roomRepository.findById(request.getRoomId())
+                    .orElseThrow(() -> new NotFoundException("Room not found"));
+            validateRequiredFeatures(request, room);
+            checkForBookingConflicts(room.getId(), request.getStartTime(), request.getEndTime());
+        } else {
+            // No explicit room: find a suitable available room by type and/or features
+            room = selectAvailableRoomForRequest(request);
+            if (room == null) {
+                throw new ResourceNotFoundException("No available rooms match the requested criteria and time period");
+            }
+            validateRequiredFeatures(request, room);
+            checkForBookingConflicts(room.getId(), request.getStartTime(), request.getEndTime());
+        }
 
         User currentUser = resolveCurrentUser();
 
@@ -61,6 +75,51 @@ public class BookingService {
         booking.setUser(currentUser);
 
         return bookingRepository.save(booking);
+    }
+
+    /**
+     * Finds the first available room that matches the given criteria and has no booking conflicts within the time range.
+     * Criteria considered:
+     * - room.available must be true
+     * - if request has roomType, room.type must match
+     * - if request has requiredFeatureIds, room must contain all those features
+     */
+    private Room selectAvailableRoomForRequest(CreateBookingRequestDto request) {
+        List<Room> allRooms = roomRepository.findAll();
+
+        List<Room> candidates = roomRepository.findAll().stream()
+                .filter(Room::isAvailable)
+                .filter(r -> {
+                    try {
+                        var method = request.getClass().getMethod("getRoomType");
+                        Object roomType = method.invoke(request);
+                        return roomType == null || roomType.equals(r.getType());
+                    } catch (Exception e) {
+                        // If request doesn't expose getRoomType(), ignore type filtering
+                        return true;
+                    }
+                })
+                .filter(r -> hasRequiredFeatures(request.getRequiredFeatureIds(), r))
+                .toList();
+
+
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        List<BookingStatus> conflictingStatuses = List.of(BookingStatus.PENDING, BookingStatus.APPROVED);
+        for (Room candidate : candidates) {
+            boolean overlaps = bookingRepository.existsByRoomIdAndStatusInAndStartTimeLessThanAndEndTimeGreaterThan(
+                    candidate.getId(),
+                    conflictingStatuses,
+                    request.getEndTime(),
+                    request.getStartTime()
+            );
+            if (!overlaps) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private void checkForHolidayConflicts(LocalDateTime startTime, LocalDateTime endTime) {
@@ -87,22 +146,34 @@ public class BookingService {
         }
     }
 
+    private boolean hasRequiredFeatures(Set<Long> requiredFeatureIds, Room room) {
+        if (requiredFeatureIds == null || requiredFeatureIds.isEmpty()) {
+            return true;
+        }
+        Set<Long> roomFeatureIds = room.getFeatures() == null
+                ? Set.of()
+                : room.getFeatures().stream()
+                .map(RoomFeature::getId)
+                .collect(Collectors.toSet());
+        return roomFeatureIds.containsAll(requiredFeatureIds);
+    }
+
     private void validateRequiredFeatures(CreateBookingRequestDto request, Room room) {
         if (request.getRequiredFeatureIds() != null && !request.getRequiredFeatureIds().isEmpty()) {
-            Set<Long> roomFeatureIds = room.getFeatures() == null
-                    ? Set.of()
-                    : room.getFeatures().stream()
-                    .map(RoomFeature::getId)
-                    .collect(Collectors.toSet());
+            if (!hasRequiredFeatures(request.getRequiredFeatureIds(), room)) {
+                Set<Long> roomFeatureIds = room.getFeatures() == null
+                        ? Set.of()
+                        : room.getFeatures().stream()
+                        .map(RoomFeature::getId)
+                        .collect(Collectors.toSet());
 
-            boolean hasAllFeatures = roomFeatureIds.containsAll(request.getRequiredFeatureIds());
-            if (!hasAllFeatures) {
                 Set<Long> missingFeatures = new java.util.HashSet<>(request.getRequiredFeatureIds());
                 missingFeatures.removeAll(roomFeatureIds);
                 throw new BadRequestException("Room is missing required features: " + missingFeatures);
             }
         }
     }
+
 
     public List<TopRecurringRoomDto> getTopRecurringRoomsForUser(Long userId, int limit) {
         if (limit <= 0) {
