@@ -1,8 +1,9 @@
 package com.team2.university_room_booking.repository;
 
 import com.team2.university_room_booking.model.Room;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+
+import java.util.Optional;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import org.springframework.stereotype.Repository;
@@ -11,4 +12,6 @@ import org.springframework.stereotype.Repository;
 public interface RoomRepository extends JpaRepository<Room, Long> {
 
     boolean existsByNameAndBuildingId(String name, Long id);
+
+    Optional<Room> findByName(String roomName);
 }
