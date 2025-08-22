@@ -1,5 +1,7 @@
 package com.team2.university_room_booking.config;
 
+import com.team2.university_room_booking.exceptions.BadRequestException;
+import com.team2.university_room_booking.exceptions.ResourceConflictException;
 import com.team2.university_room_booking.exceptions.ResourceNotFoundException;
 import com.team2.university_room_booking.exceptions.UserAlreadyExistsException;
 import io.jsonwebtoken.JwtException;
@@ -59,4 +61,15 @@ public class ControllerAdvice {
     public ResponseEntity<Map<String, Object>> handleJwtException(JwtException ex, HttpServletRequest request) {
         return buildResponse(HttpStatus.UNAUTHORIZED, ex.getMessage(), request);
     }
+
+    @ExceptionHandler(ResourceConflictException.class)
+    public ResponseEntity<Map<String,Object>> handleResourceConflictException(ResourceConflictException ex, HttpServletRequest request){
+        return buildResponse(HttpStatus.CONFLICT, ex.getMessage(),request);
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<Map<String,Object>> handleBadRequestException(BadRequestException ex, HttpServletRequest request){
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(),request);
+    }
 }
+
