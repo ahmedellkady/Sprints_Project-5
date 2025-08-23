@@ -1,10 +1,15 @@
 package com.team2.university_room_booking.service;
 
+import com.team2.university_room_booking.dto.request.AvailabilityRequestDto;
 import com.team2.university_room_booking.dto.request.RoomRequestDto;
+import com.team2.university_room_booking.dto.response.AvailableRoomTimesDto;
 import com.team2.university_room_booking.dto.response.RoomDto;
+import com.team2.university_room_booking.enums.BookingStatus;
 import com.team2.university_room_booking.exceptions.BadRequestException;
+import com.team2.university_room_booking.exceptions.ResourceConflictException;
 import com.team2.university_room_booking.exceptions.ResourceNotFoundException;
 import com.team2.university_room_booking.mapper.DtoMapper;
+import com.team2.university_room_booking.model.Booking;
 import com.team2.university_room_booking.model.Building;
 import com.team2.university_room_booking.model.Room;
 import com.team2.university_room_booking.model.RoomFeature;
@@ -16,9 +21,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -92,7 +96,7 @@ public class RoomService {
         }
         // Prevent deleting booked room
         if (bookingRepository.existsByRoomId(id)) {
-            throw new BadRequestException("Cannot delete room with active bookings.");
+            throw new ResourceConflictException("Cannot delete room with active bookings.");
         }
 
         roomRepository.deleteById(id);
@@ -140,4 +144,55 @@ public class RoomService {
         return features;
     }
 
+    public List<AvailableRoomTimesDto> getRoomAvailability(Long roomId, AvailabilityRequestDto request) {
+        if (request == null || request.getStart() == null || request.getEnd() == null) {
+            throw new BadRequestException("Start and end times must be provided");
+        }
+
+        LocalDateTime start = request.getStart();
+        LocalDateTime end = request.getEnd();
+
+        validateBookingTimes(start, end);
+
+        List<Booking> bookings = bookingRepository.findAllOverlappingBookings(
+                roomId,
+                List.of(BookingStatus.APPROVED, BookingStatus.PENDING),
+                start,
+                end
+        );
+
+        bookings.sort(Comparator.comparing(Booking::getStartTime));
+
+        List<AvailableRoomTimesDto> freeSlots = new ArrayList<>();
+        LocalDateTime current = start;
+
+        for (Booking b : bookings) {
+            if (current.isBefore(b.getStartTime())) {
+                freeSlots.add(new AvailableRoomTimesDto(current, b.getStartTime()));
+            }
+            if (b.getEndTime().isAfter(current)) {
+                current = b.getEndTime();
+            }
+        }
+
+        if (current.isBefore(end)) {
+            freeSlots.add(new AvailableRoomTimesDto(current, end));
+        }
+
+        return freeSlots;
+    }
+    private void validateBookingTimes(LocalDateTime start, LocalDateTime end) {
+        if (start == null || end == null) {
+            throw new BadRequestException("Start and end times must not be null");
+        }
+
+        if (!end.isAfter(start)) {
+            throw new BadRequestException("End time must be after start time");
+        }
+
+        // optional: block past times (policy-based)
+        if (start.isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("Cannot request availability in the past");
+        }
+    }
 }

@@ -59,4 +59,18 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
                        @Param("end") LocalDateTime end);
 
 
+    @Query("""
+    SELECT b FROM Booking b
+    WHERE b.room.id = :roomId
+      AND b.status IN :statuses
+      AND b.startTime < :end
+      AND b.endTime   > :start
+    """)
+    List<Booking> findAllOverlappingBookings(
+            @Param("roomId") Long roomId,
+            @Param("statuses") Collection<BookingStatus> statuses,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+
 }
