@@ -18,9 +18,9 @@ import com.team2.university_room_booking.repository.RoomRepository;
 import com.team2.university_room_booking.security.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BookingService {
@@ -63,6 +64,9 @@ public class BookingService {
             // No explicit room: find a suitable available room by type and/or features
             room = selectAvailableRoomForRequest(request);
             if (room == null) {
+                int featuresCount = request.getRequiredFeatureIds() == null ? 0 : request.getRequiredFeatureIds().size();
+                log.warn("booking.create.no-available-rooms criteria={{featuresCount:{}}} timeWindow={{start:{}, end:{}}}",
+                        featuresCount, request.getStartTime(), request.getEndTime());
                 throw new ResourceNotFoundException("No available rooms match the requested criteria and time period");
             }
             validateRequiredFeatures(request, room);
@@ -79,7 +83,11 @@ public class BookingService {
         booking.setStatus(BookingStatus.PENDING);
         booking.setUser(currentUser);
 
-        return bookingRepository.save(booking);
+        Booking saved = bookingRepository.save(booking);
+        log.info("booking.create.success bookingId={} userId={} roomId={} start={} end={} status={}",
+                saved.getId(), currentUser.getId(), room.getId(), saved.getStartTime(), saved.getEndTime(), saved.getStatus());
+
+        return saved;
     }
 
     @Transactional
@@ -90,7 +98,6 @@ public class BookingService {
                 .toList();
     }
 
-
     @Transactional
     public BookingDto cancelBooking(Long bookingId){
         Booking booking = bookingRepository.findById(bookingId)
@@ -99,24 +106,29 @@ public class BookingService {
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
 
         if (!booking.getUser().getUsername().equals(currentUsername)) {
+            log.warn("booking.cancel.denied bookingId={} actorUsername={} reason={}", bookingId, currentUsername, "NOT_OWNER");
             throw new AccessDeniedException("You don't have permission to cancel this booking");
         }
 
         LocalDateTime now = LocalDateTime.now();
 
-        //cancellation only allowed before start time
+        // cancellation only allowed before start time
         if (!now.isBefore(booking.getStartTime())) {
+            log.warn("booking.cancel.denied bookingId={} actorUsername={} reason={}", bookingId, currentUsername, "AFTER_START_TIME");
             throw new AccessDeniedException("Booking cannot be cancelled after start time");
         }
 
-        //cancellation only allowed if status is PENDING or APPROVED
+        // cancellation only allowed if status is PENDING or APPROVED
         if (!(booking.getStatus() == BookingStatus.PENDING || booking.getStatus() == BookingStatus.APPROVED)) {
+            log.warn("booking.cancel.denied bookingId={} actorUsername={} reason={} currentStatus={}",
+                    bookingId, currentUsername, "INVALID_STATUS", booking.getStatus());
             throw new AccessDeniedException("Booking cannot be cancelled in status: " + booking.getStatus());
         }
 
         booking.setStatus(BookingStatus.CANCELLED);
         bookingRepository.save(booking);
-        //the cancellation action should be recorded in book history.
+        // the cancellation action should be recorded in booking history.
+        log.info("booking.cancel.success bookingId={} actorUsername={}", bookingId, currentUsername);
 
         return dtoMapper.toBookingDto(booking);
     }
@@ -126,14 +138,21 @@ public class BookingService {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new BadRequestException("Booking not found with id " + bookingId));
 
+        String actor = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getName()
+                : "unknown";
+
         if (booking.getStatus() != BookingStatus.PENDING) {
+            log.warn("booking.reject.denied bookingId={} actorUsername={} currentStatus={}",
+                    bookingId, actor, booking.getStatus());
             throw new BadRequestException("Only pending bookings can be rejected");
         }
 
         booking.setStatus(BookingStatus.REJECTED);
         bookingRepository.save(booking);
+        log.info("booking.reject.success bookingId={} actorUsername={}", bookingId, actor);
 
-        //the rejection and rejection message should be logged in booking history.
+        // the rejection and rejection message should be logged in booking history.
 
         return dtoMapper.toBookingDto(booking);
     }
@@ -143,20 +162,28 @@ public class BookingService {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id " + bookingId));
 
+        String actor = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getName()
+                : "unknown";
+
         if (booking.getStatus() != BookingStatus.PENDING) {
+            log.warn("booking.approve.denied bookingId={} actorUsername={} currentStatus={}",
+                    bookingId, actor, booking.getStatus());
             throw new BadRequestException("Only PENDING bookings can be approved");
         }
 
-        //check if a holiday have been added after booking request
+        // check if a holiday has been added after booking request
         checkForHolidayConflicts(booking.getStartTime(), booking.getEndTime());
 
         booking.setStatus(BookingStatus.APPROVED);
         bookingRepository.save(booking);
+        log.info("booking.approve.success bookingId={} actorUsername={}", bookingId, actor);
 
-        //the acceptance should be logged in booking history
+        // the acceptance should be logged in booking history
 
         return dtoMapper.toBookingDto(booking);
     }
+
     /**
      * Finds the first available room that matches the given criteria and has no booking conflicts within the time range.
      * Criteria considered:
@@ -182,6 +209,13 @@ public class BookingService {
                 .filter(r -> hasRequiredFeatures(request.getRequiredFeatureIds(), r))
                 .toList();
 
+        int featuresCount = request.getRequiredFeatureIds() == null ? 0 : request.getRequiredFeatureIds().size();
+        Object roomTypeForLog = null;
+        try {
+            var method = request.getClass().getMethod("getRoomType");
+            roomTypeForLog = method.invoke(request);
+        } catch (Exception ignored) {
+        }
 
         if (candidates.isEmpty()) {
             return null;
@@ -196,6 +230,8 @@ public class BookingService {
                     request.getStartTime()
             );
             if (!overlaps) {
+                log.info("booking.room.autoselect.success criteria={{type:{}, featuresCount:{}}} selectedRoomId={}",
+                        roomTypeForLog, featuresCount, candidate.getId());
                 return candidate;
             }
         }
@@ -208,6 +244,8 @@ public class BookingService {
             String holidayNames = overlappingHolidays.stream()
                     .map(Holiday::getName)
                     .collect(Collectors.joining(", "));
+            log.warn("booking.holiday.conflict count={} names={} start={} end={}",
+                    overlappingHolidays.size(), holidayNames, startTime, endTime);
             throw new ResourceConflictException("Booking falls on a holiday: " + holidayNames);
         }
     }
@@ -222,6 +260,7 @@ public class BookingService {
         );
 
         if (overlaps) {
+            log.warn("booking.overlap.conflict roomId={} start={} end={}", roomId, startTime, endTime);
             throw new ResourceConflictException("Requested time overlaps with an existing booking");
         }
     }
@@ -249,11 +288,11 @@ public class BookingService {
 
                 Set<Long> missingFeatures = new java.util.HashSet<>(request.getRequiredFeatureIds());
                 missingFeatures.removeAll(roomFeatureIds);
+                log.warn("booking.features.missing roomId={} missingCount={}", room.getId(), missingFeatures.size());
                 throw new BadRequestException("Room is missing required features: " + missingFeatures);
             }
         }
     }
-
 
     public List<TopRecurringRoomDto> getTopRecurringRoomsForUser(Long userId, int limit) {
         if (limit <= 0) {
@@ -271,6 +310,7 @@ public class BookingService {
     private User resolveCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {
+            log.warn("auth.resolve failed reason={}", "UNAUTHENTICATED");
             throw new InvalidLoginException("You must be logged in");
         }
 
@@ -304,6 +344,7 @@ public class BookingService {
         }
 
         if (username == null) {
+            log.warn("auth.resolve failed reason={}", "USERNAME_UNAVAILABLE");
             throw new InvalidLoginException("Unable to resolve current user from authentication");
         }
 
@@ -312,6 +353,7 @@ public class BookingService {
             return u;
         }
 
+        log.warn("auth.resolve failed reason={}", "NOT_DOMAIN_USER");
         throw new InvalidLoginException("Authenticated principal is not a domain User");
     }
 }
