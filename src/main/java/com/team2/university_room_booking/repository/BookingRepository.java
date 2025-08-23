@@ -23,6 +23,8 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
     boolean existsByRoomId(Long roomId);
 
+    List<Booking> findByStatus(BookingStatus status);
+
     boolean existsByRoomIdAndStatusInAndStartTimeLessThanAndEndTimeGreaterThan(
             Long roomId,
             Collection<BookingStatus> statuses,
@@ -55,4 +57,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Long countOverlaps(@Param("roomName") String roomName,
                        @Param("start") LocalDateTime start,
                        @Param("end") LocalDateTime end);
+
+
 }

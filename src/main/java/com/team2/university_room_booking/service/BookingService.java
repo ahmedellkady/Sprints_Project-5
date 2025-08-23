@@ -1,9 +1,12 @@
 package com.team2.university_room_booking.service;
 
 import com.team2.university_room_booking.dto.request.CreateBookingRequestDto;
+import com.team2.university_room_booking.dto.request.RejectBookingDto;
+import com.team2.university_room_booking.dto.response.BookingDto;
 import com.team2.university_room_booking.dto.response.TopRecurringRoomDto;
 import com.team2.university_room_booking.enums.BookingStatus;
 import com.team2.university_room_booking.exceptions.*;
+import com.team2.university_room_booking.mapper.DtoMapper;
 import com.team2.university_room_booking.model.Booking;
 import com.team2.university_room_booking.model.Holiday;
 import com.team2.university_room_booking.model.Room;
@@ -17,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -40,6 +44,7 @@ public class BookingService {
     private final HolidayRepository holidayRepository;
     private final CustomUserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
+    private final DtoMapper dtoMapper;
 
     @Transactional
     public Booking createBooking(CreateBookingRequestDto request) {
@@ -77,6 +82,81 @@ public class BookingService {
         return bookingRepository.save(booking);
     }
 
+    @Transactional
+    public List<BookingDto> getAllBookingsByStatus(BookingStatus status) {
+        List<Booking> bookings = bookingRepository.findByStatus(status);
+        return bookings.stream()
+                .map(dtoMapper::toBookingDto)
+                .toList();
+    }
+
+
+    @Transactional
+    public BookingDto cancelBooking(Long bookingId){
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id " + bookingId));
+
+        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
+
+        if (!booking.getUser().getUsername().equals(currentUsername)) {
+            throw new AccessDeniedException("You don't have permission to cancel this booking");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        //cancellation only allowed before start time
+        if (!now.isBefore(booking.getStartTime())) {
+            throw new AccessDeniedException("Booking cannot be cancelled after start time");
+        }
+
+        //cancellation only allowed if status is PENDING or APPROVED
+        if (!(booking.getStatus() == BookingStatus.PENDING || booking.getStatus() == BookingStatus.APPROVED)) {
+            throw new AccessDeniedException("Booking cannot be cancelled in status: " + booking.getStatus());
+        }
+
+        booking.setStatus(BookingStatus.CANCELLED);
+        bookingRepository.save(booking);
+        //the cancellation action should be recorded in book history.
+
+        return dtoMapper.toBookingDto(booking);
+    }
+
+    @Transactional
+    public BookingDto rejectBooking(Long bookingId, RejectBookingDto rejectBookingDto){
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new BadRequestException("Booking not found with id " + bookingId));
+
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new BadRequestException("Only pending bookings can be rejected");
+        }
+
+        booking.setStatus(BookingStatus.REJECTED);
+        bookingRepository.save(booking);
+
+        //the rejection and rejection message should be logged in booking history.
+
+        return dtoMapper.toBookingDto(booking);
+    }
+
+    @Transactional
+    public BookingDto approveBooking(Long bookingId){
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id " + bookingId));
+
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new BadRequestException("Only PENDING bookings can be approved");
+        }
+
+        //check if a holiday have been added after booking request
+        checkForHolidayConflicts(booking.getStartTime(), booking.getEndTime());
+
+        booking.setStatus(BookingStatus.APPROVED);
+        bookingRepository.save(booking);
+
+        //the acceptance should be logged in booking history
+
+        return dtoMapper.toBookingDto(booking);
+    }
     /**
      * Finds the first available room that matches the given criteria and has no booking conflicts within the time range.
      * Criteria considered:
