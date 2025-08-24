@@ -11,6 +11,7 @@ import com.team2.university_room_booking.model.User;
 import com.team2.university_room_booking.repository.UserRepository;
 import com.team2.university_room_booking.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -18,6 +19,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService {
@@ -39,6 +41,7 @@ public class UserService {
 
         // Save user
         User savedUser = userRepository.save(user);
+        log.info("Registering new user");
         return dtoMapper.toUserDto(savedUser);
     }
 
