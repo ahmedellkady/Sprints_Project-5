@@ -46,6 +46,7 @@ public class BookingService {
     private final CustomUserDetailsService userDetailsService;
     private final JwtUtil jwtUtil;
     private final DtoMapper dtoMapper;
+    private final BookingHistoryService bookingHistoryService;
 
     @Transactional
     public Booking createBooking(CreateBookingRequestDto request) {
@@ -84,6 +85,8 @@ public class BookingService {
         booking.setUser(currentUser);
 
         Booking saved = bookingRepository.save(booking);
+        bookingHistoryService.createAuditEntry(saved, BookingStatus.PENDING, currentUser, null);
+
         log.info("booking.create.success bookingId={} userId={} roomId={} start={} end={} status={}",
                 saved.getId(), currentUser.getId(), room.getId(), saved.getStartTime(), saved.getEndTime(), saved.getStatus());
 
@@ -127,7 +130,8 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CANCELLED);
         bookingRepository.save(booking);
-        // the cancellation action should be recorded in booking history.
+        User currentUser = resolveCurrentUser();
+        bookingHistoryService.createAuditEntry(booking, BookingStatus.CANCELLED, currentUser, null);
         log.info("booking.cancel.success bookingId={} actorUsername={}", bookingId, currentUsername);
 
         return dtoMapper.toBookingDto(booking);
@@ -150,9 +154,14 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.REJECTED);
         bookingRepository.save(booking);
+
+        User actorUsername = resolveCurrentUser();
+        String rejectionReason = rejectBookingDto.getReason();
+        bookingHistoryService.createAuditEntry(booking,BookingStatus.REJECTED,actorUsername,rejectionReason);
+
         log.info("booking.reject.success bookingId={} actorUsername={}", bookingId, actor);
 
-        // the rejection and rejection message should be logged in booking history.
+
 
         return dtoMapper.toBookingDto(booking);
     }
@@ -177,9 +186,13 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.APPROVED);
         bookingRepository.save(booking);
+
+        User actorUsername = resolveCurrentUser();
+        bookingHistoryService.createAuditEntry(booking,BookingStatus.APPROVED,actorUsername,null);
+
         log.info("booking.approve.success bookingId={} actorUsername={}", bookingId, actor);
 
-        // the acceptance should be logged in booking history
+
 
         return dtoMapper.toBookingDto(booking);
     }

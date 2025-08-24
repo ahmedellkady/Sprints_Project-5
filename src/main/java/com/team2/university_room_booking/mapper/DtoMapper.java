@@ -68,6 +68,8 @@ public class DtoMapper {
     }
 
     public HolidayDto toHolidayDto(Holiday holiday) {
-        return modelMapper.map(holiday, HolidayDto.class);
-    }
+        return modelMapper.map(holiday, HolidayDto.class);}
+
+    public BookingHistory toBookingHistoryEntity(BookingHistoryDto dto){return modelMapper.map(dto,BookingHistory.class);}
+    public BookingHistoryDto tobookingHistoryDto(BookingHistory bookingHistory){return modelMapper.map(bookingHistory,BookingHistoryDto.class);}
 }
