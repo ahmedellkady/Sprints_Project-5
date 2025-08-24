@@ -1,5 +1,6 @@
 package com.team2.university_room_booking.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,6 +30,7 @@ public class HolidayController {
     private final HolidayService holidayService;
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<HolidayDto> create(@RequestBody HolidayRequestDto dto) {
         HolidayDto saved = holidayService.createHoliday(dto);
 
@@ -46,11 +48,13 @@ public class HolidayController {
     }
     
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public HolidayDto update(@PathVariable Long id, @Valid @RequestBody HolidayRequestDto dto) {
         return holidayService.updateHoliday(id, dto);
     }
 
     @DeleteMapping("/{name}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable String name) {
         holidayService.deleteHoliday(name);
         return ResponseEntity.noContent().build();
