@@ -59,6 +59,10 @@ class BookingServiceTest {
     @InjectMocks
     private BookingService bookingService;
 
+    @Mock
+    private BookingHistoryService bookingHistoryService;
+
+    private Booking testBooking;
     private User testUser;
     private Room testRoom;
     private CreateBookingRequestDto createBookingRequestDto;
@@ -78,6 +82,14 @@ class BookingServiceTest {
         createBookingRequestDto.setStartTime(LocalDateTime.now().plusHours(1));
         createBookingRequestDto.setEndTime(LocalDateTime.now().plusHours(2));
         createBookingRequestDto.setPurpose("Test Meeting");
+
+        testBooking = new Booking();
+        testBooking.setId(1L);
+        testBooking.setUser(testUser);
+        testBooking.setRoom(testRoom);
+        testBooking.setStartTime(LocalDateTime.now().plusHours(1));
+        testBooking.setEndTime(LocalDateTime.now().plusHours(2));
+        testBooking.setStatus(BookingStatus.PENDING);
     }
 
     private void setupSecurityContext() {
@@ -94,6 +106,8 @@ class BookingServiceTest {
         when(holidayRepository.findOverlappingHolidays(any(), any())).thenReturn(Collections.emptyList());
         when(bookingRepository.existsByRoomIdAndStatusInAndStartTimeLessThanAndEndTimeGreaterThan(any(), any(), any(), any())).thenReturn(false);
         when(bookingRepository.save(any(Booking.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        doNothing().when(bookingHistoryService).createAuditEntry(any(), any(), any(), any());
 
         Booking booking = bookingService.createBooking(createBookingRequestDto);
 
@@ -168,28 +182,24 @@ class BookingServiceTest {
     void cancelBooking_Success() {
         setupSecurityContext();
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setUser(testUser);
-        booking.setRoom(testRoom);
-        booking.setStartTime(LocalDateTime.now().plusHours(1));
-        booking.setEndTime(LocalDateTime.now().plusHours(2));
-        booking.setStatus(BookingStatus.PENDING);
+        testBooking.setStatus(BookingStatus.PENDING);
 
         BookingDto bookingDto = new BookingDto();
         bookingDto.setId(1L);
         bookingDto.setStatus(BookingStatus.CANCELLED);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
         when(authentication.getName()).thenReturn(testUser.getUsername());
         when(bookingRepository.save(any(Booking.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
 
-        BookingDto result = bookingService.cancelBooking(1L);
+        doNothing().when(bookingHistoryService).createAuditEntry(any(), any(), any(), any());
+
+        BookingDto result = bookingService.cancelBooking(testBooking.getId());
 
         assertEquals(BookingStatus.CANCELLED, result.getStatus());
-        verify(bookingRepository).save(booking);
-        verify(dtoMapper).toBookingDto(booking);
+        verify(bookingRepository).save(testBooking);
+        verify(dtoMapper).toBookingDto(testBooking);
     }
 
     @Test
@@ -206,51 +216,36 @@ class BookingServiceTest {
         otherUser.setId(2L);
         otherUser.setUsername("otheruser");
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setUser(otherUser);
-        booking.setStartTime(LocalDateTime.now().plusHours(1));
-        booking.setEndTime(LocalDateTime.now().plusHours(2));
-        booking.setStatus(BookingStatus.PENDING);
+        testBooking.setUser(otherUser);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
         when(authentication.getName()).thenReturn(testUser.getUsername());
 
-        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(testBooking.getId()));
     }
 
     @Test
     void cancelBooking_AfterStart_ThrowsAccessDenied() {
         setupSecurityContext();
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setUser(testUser);
-        booking.setStartTime(LocalDateTime.now().minusHours(1)); // already started
-        booking.setEndTime(LocalDateTime.now().plusHours(1));
-        booking.setStatus(BookingStatus.PENDING);
+        testBooking.setStartTime(LocalDateTime.now().minusHours(1)); // already started
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
         when(authentication.getName()).thenReturn(testUser.getUsername());
 
-        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(testBooking.getId()));
     }
 
     @Test
     void cancelBooking_InvalidStatus_ThrowsAccessDenied() {
         setupSecurityContext();
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setUser(testUser);
-        booking.setStartTime(LocalDateTime.now().plusHours(1));
-        booking.setEndTime(LocalDateTime.now().plusHours(2));
-        booking.setStatus(BookingStatus.REJECTED); // not cancellable
+        testBooking.setStatus(BookingStatus.REJECTED); // not cancellable
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
         when(authentication.getName()).thenReturn(testUser.getUsername());
 
-        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(testBooking.getId()));
     }
 
     //Reject Booking
@@ -258,25 +253,23 @@ class BookingServiceTest {
     void rejectBooking_Success() {
         setupSecurityContext();
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setStatus(BookingStatus.PENDING);
-
         BookingDto bookingDto = new BookingDto();
         bookingDto.setId(1L);
         bookingDto.setStatus(BookingStatus.REJECTED);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(testBooking));
         when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
         when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
 
+        doNothing().when(bookingHistoryService).createAuditEntry(any(), any(), any(), any());
+
         var dto = new RejectBookingDto();
 
-        BookingDto result = bookingService.rejectBooking(1L, dto);
+        BookingDto result = bookingService.rejectBooking(testBooking.getId(), dto);
 
         assertEquals(BookingStatus.REJECTED, result.getStatus());
-        verify(bookingRepository).save(booking);
-        verify(dtoMapper).toBookingDto(booking);
+        verify(bookingRepository).save(testBooking);
+        verify(dtoMapper).toBookingDto(testBooking);
     }
 
     @Test
@@ -291,15 +284,13 @@ class BookingServiceTest {
 
     @Test
     void rejectBooking_NotPending_ThrowsBadRequest() {
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setStatus(BookingStatus.APPROVED);
+        testBooking.setStatus(BookingStatus.APPROVED);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
 
         assertThrows(
                 BadRequestException.class,
-                () -> bookingService.rejectBooking(1L, new RejectBookingDto())
+                () -> bookingService.rejectBooking(testBooking.getId(), new RejectBookingDto())
         );
     }
 
@@ -308,26 +299,22 @@ class BookingServiceTest {
     void approveBooking_Success() {
         setupSecurityContext();
 
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setStatus(BookingStatus.PENDING);
-        booking.setStartTime(LocalDateTime.now().plusHours(1));
-        booking.setEndTime(LocalDateTime.now().plusHours(2));
-
         BookingDto bookingDto = new BookingDto();
         bookingDto.setId(1L);
         bookingDto.setStatus(BookingStatus.APPROVED);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
         when(holidayRepository.findOverlappingHolidays(any(), any())).thenReturn(Collections.emptyList());
         when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
         when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
 
-        BookingDto result = bookingService.approveBooking(1L);
+        doNothing().when(bookingHistoryService).createAuditEntry(any(), any(), any(), any());
+
+        BookingDto result = bookingService.approveBooking(testBooking.getId());
 
         assertEquals(BookingStatus.APPROVED, result.getStatus());
-        verify(bookingRepository).save(booking);
-        verify(dtoMapper).toBookingDto(booking);
+        verify(bookingRepository).save(testBooking);
+        verify(dtoMapper).toBookingDto(testBooking);
     }
 
     @Test
@@ -342,33 +329,26 @@ class BookingServiceTest {
 
     @Test
     void approveBooking_NotPending_ThrowsBadRequest() {
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setStatus(BookingStatus.CANCELLED);
 
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        testBooking.setStatus(BookingStatus.CANCELLED);
+
+        when(bookingRepository.findById(testBooking.getId())).thenReturn(Optional.of(testBooking));
 
         assertThrows(
                 BadRequestException.class,
-                () -> bookingService.approveBooking(1L)
+                () -> bookingService.approveBooking(testBooking.getId())
         );
     }
 
     @Test
     void approveBooking_HolidayConflict_ThrowsResourceConflict() {
-        Booking booking = new Booking();
-        booking.setId(1L);
-        booking.setStatus(BookingStatus.PENDING);
-        booking.setStartTime(LocalDateTime.now().plusHours(1));
-        booking.setEndTime(LocalDateTime.now().plusHours(2));
-
-        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(testBooking));
         when(holidayRepository.findOverlappingHolidays(any(), any()))
-                .thenReturn(List.of(new Holiday(1L, "Holiday", booking.getStartTime(), booking.getEndTime())));
+                .thenReturn(List.of(new Holiday(1L, "Holiday", testBooking.getStartTime(), testBooking.getEndTime())));
 
         assertThrows(
                 ResourceConflictException.class,
-                () -> bookingService.approveBooking(1L)
+                () -> bookingService.approveBooking(testBooking.getId())
         );
     }
 }
