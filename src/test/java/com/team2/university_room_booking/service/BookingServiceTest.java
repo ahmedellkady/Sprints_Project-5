@@ -1,11 +1,12 @@
 package com.team2.university_room_booking.service;
 
 import com.team2.university_room_booking.dto.request.CreateBookingRequestDto;
+import com.team2.university_room_booking.dto.request.RejectBookingDto;
+import com.team2.university_room_booking.dto.response.BookingDto;
 import com.team2.university_room_booking.dto.response.TopRecurringRoomDto;
 import com.team2.university_room_booking.enums.BookingStatus;
-import com.team2.university_room_booking.exceptions.BadRequestException;
-import com.team2.university_room_booking.exceptions.NotFoundException;
-import com.team2.university_room_booking.exceptions.ResourceConflictException;
+import com.team2.university_room_booking.exceptions.*;
+import com.team2.university_room_booking.mapper.DtoMapper;
 import com.team2.university_room_booking.model.Booking;
 import com.team2.university_room_booking.model.Holiday;
 import com.team2.university_room_booking.model.Room;
@@ -52,6 +53,9 @@ class BookingServiceTest {
     @Mock
     private Authentication authentication;
 
+    @Mock
+    private DtoMapper dtoMapper;
+
     @InjectMocks
     private BookingService bookingService;
 
@@ -79,8 +83,8 @@ class BookingServiceTest {
     private void setupSecurityContext() {
         when(securityContext.getAuthentication()).thenReturn(authentication);
         SecurityContextHolder.setContext(securityContext);
-        when(authentication.getPrincipal()).thenReturn(testUser);
-        when(authentication.isAuthenticated()).thenReturn(true);
+        lenient().when(authentication.getPrincipal()).thenReturn(testUser);
+        lenient().when(authentication.isAuthenticated()).thenReturn(true);
     }
 
     @Test
@@ -157,5 +161,214 @@ class BookingServiceTest {
 
         bookingService.getTopRecurringRoomsForUser(userId, -1);
         verify(bookingRepository, times(2)).findTopRoomsByUser(eq(userId), eq(PageRequest.of(0, 3)));
+    }
+
+    //Cancel Booking
+    @Test
+    void cancelBooking_Success() {
+        setupSecurityContext();
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setUser(testUser);
+        booking.setRoom(testRoom);
+        booking.setStartTime(LocalDateTime.now().plusHours(1));
+        booking.setEndTime(LocalDateTime.now().plusHours(2));
+        booking.setStatus(BookingStatus.PENDING);
+
+        BookingDto bookingDto = new BookingDto();
+        bookingDto.setId(1L);
+        bookingDto.setStatus(BookingStatus.CANCELLED);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(authentication.getName()).thenReturn(testUser.getUsername());
+        when(bookingRepository.save(any(Booking.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
+
+        BookingDto result = bookingService.cancelBooking(1L);
+
+        assertEquals(BookingStatus.CANCELLED, result.getStatus());
+        verify(bookingRepository).save(booking);
+        verify(dtoMapper).toBookingDto(booking);
+    }
+
+    @Test
+    void cancelBooking_BookingNotFound_ThrowsException() {
+        when(bookingRepository.findById(99L)).thenReturn(Optional.empty());
+        assertThrows(ResourceNotFoundException.class, () -> bookingService.cancelBooking(99L));
+    }
+
+    @Test
+    void cancelBooking_NotOwner_ThrowsAccessDenied() {
+        setupSecurityContext();
+
+        User otherUser = new User();
+        otherUser.setId(2L);
+        otherUser.setUsername("otheruser");
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setUser(otherUser);
+        booking.setStartTime(LocalDateTime.now().plusHours(1));
+        booking.setEndTime(LocalDateTime.now().plusHours(2));
+        booking.setStatus(BookingStatus.PENDING);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(authentication.getName()).thenReturn(testUser.getUsername());
+
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+    }
+
+    @Test
+    void cancelBooking_AfterStart_ThrowsAccessDenied() {
+        setupSecurityContext();
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setUser(testUser);
+        booking.setStartTime(LocalDateTime.now().minusHours(1)); // already started
+        booking.setEndTime(LocalDateTime.now().plusHours(1));
+        booking.setStatus(BookingStatus.PENDING);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(authentication.getName()).thenReturn(testUser.getUsername());
+
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+    }
+
+    @Test
+    void cancelBooking_InvalidStatus_ThrowsAccessDenied() {
+        setupSecurityContext();
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setUser(testUser);
+        booking.setStartTime(LocalDateTime.now().plusHours(1));
+        booking.setEndTime(LocalDateTime.now().plusHours(2));
+        booking.setStatus(BookingStatus.REJECTED); // not cancellable
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(authentication.getName()).thenReturn(testUser.getUsername());
+
+        assertThrows(AccessDeniedException.class, () -> bookingService.cancelBooking(1L));
+    }
+
+    //Reject Booking
+    @Test
+    void rejectBooking_Success() {
+        setupSecurityContext();
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setStatus(BookingStatus.PENDING);
+
+        BookingDto bookingDto = new BookingDto();
+        bookingDto.setId(1L);
+        bookingDto.setStatus(BookingStatus.REJECTED);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
+
+        var dto = new RejectBookingDto();
+
+        BookingDto result = bookingService.rejectBooking(1L, dto);
+
+        assertEquals(BookingStatus.REJECTED, result.getStatus());
+        verify(bookingRepository).save(booking);
+        verify(dtoMapper).toBookingDto(booking);
+    }
+
+    @Test
+    void rejectBooking_BookingNotFound_ThrowsBadRequest() {
+        when(bookingRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(
+                BadRequestException.class,
+                () -> bookingService.rejectBooking(99L, new RejectBookingDto())
+        );
+    }
+
+    @Test
+    void rejectBooking_NotPending_ThrowsBadRequest() {
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setStatus(BookingStatus.APPROVED);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+
+        assertThrows(
+                BadRequestException.class,
+                () -> bookingService.rejectBooking(1L, new RejectBookingDto())
+        );
+    }
+
+    //Approve Booking
+    @Test
+    void approveBooking_Success() {
+        setupSecurityContext();
+
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setStatus(BookingStatus.PENDING);
+        booking.setStartTime(LocalDateTime.now().plusHours(1));
+        booking.setEndTime(LocalDateTime.now().plusHours(2));
+
+        BookingDto bookingDto = new BookingDto();
+        bookingDto.setId(1L);
+        bookingDto.setStatus(BookingStatus.APPROVED);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(holidayRepository.findOverlappingHolidays(any(), any())).thenReturn(Collections.emptyList());
+        when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(dtoMapper.toBookingDto(any(Booking.class))).thenReturn(bookingDto);
+
+        BookingDto result = bookingService.approveBooking(1L);
+
+        assertEquals(BookingStatus.APPROVED, result.getStatus());
+        verify(bookingRepository).save(booking);
+        verify(dtoMapper).toBookingDto(booking);
+    }
+
+    @Test
+    void approveBooking_BookingNotFound_ThrowsResourceNotFound() {
+        when(bookingRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> bookingService.approveBooking(99L)
+        );
+    }
+
+    @Test
+    void approveBooking_NotPending_ThrowsBadRequest() {
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setStatus(BookingStatus.CANCELLED);
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+
+        assertThrows(
+                BadRequestException.class,
+                () -> bookingService.approveBooking(1L)
+        );
+    }
+
+    @Test
+    void approveBooking_HolidayConflict_ThrowsResourceConflict() {
+        Booking booking = new Booking();
+        booking.setId(1L);
+        booking.setStatus(BookingStatus.PENDING);
+        booking.setStartTime(LocalDateTime.now().plusHours(1));
+        booking.setEndTime(LocalDateTime.now().plusHours(2));
+
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        when(holidayRepository.findOverlappingHolidays(any(), any()))
+                .thenReturn(List.of(new Holiday(1L, "Holiday", booking.getStartTime(), booking.getEndTime())));
+
+        assertThrows(
+                ResourceConflictException.class,
+                () -> bookingService.approveBooking(1L)
+        );
     }
 }
