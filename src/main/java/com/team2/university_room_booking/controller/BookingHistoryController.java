@@ -3,6 +3,7 @@ package com.team2.university_room_booking.controller;
 import com.team2.university_room_booking.dto.response.BookingHistoryDto;
 import com.team2.university_room_booking.enums.BookingStatus;
 import com.team2.university_room_booking.service.BookingHistoryService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -13,15 +14,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("/api")
 @PreAuthorize("hasRole('ADMIN')")
 public class BookingHistoryController{
 
     private final BookingHistoryService bookingHistoryService;
-
-    public BookingHistoryController(BookingHistoryService bookingHistoryService) {
-        this.bookingHistoryService = bookingHistoryService;
-    }
 
     @GetMapping("/booking-history")
     public ResponseEntity<List<BookingHistoryDto>> getAuditTrail(

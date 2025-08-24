@@ -23,7 +23,7 @@ public class BookingHistoryDto {
 
 
     private Long actorId;
-    private String actorName;
+    private String actorUserName;
     private String actorRole; // ADMIN, STUDENT, FACULTY MEMBER
 
     private BookingStatus status;

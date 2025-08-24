@@ -7,6 +7,7 @@ import com.team2.university_room_booking.model.Booking;
 import com.team2.university_room_booking.model.BookingHistory;
 import com.team2.university_room_booking.model.User;
 import com.team2.university_room_booking.repository.BookingHistoryRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -15,17 +16,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-
+@RequiredArgsConstructor
 public class BookingHistoryService {
 
     private final BookingHistoryRepository bookingHistoryRepository;
     private final DtoMapper dtoMapper;
-
-    public BookingHistoryService(BookingHistoryRepository bookingHistoryRepository,
-                                 DtoMapper dtoMapper) {
-        this.bookingHistoryRepository = bookingHistoryRepository;
-        this.dtoMapper = dtoMapper;
-    }
 
     // Create audit entry
     public void createAuditEntry(Booking booking, BookingStatus status, User actor, String reason) {

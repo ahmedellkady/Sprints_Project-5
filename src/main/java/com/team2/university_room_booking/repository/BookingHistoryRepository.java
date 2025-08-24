@@ -16,7 +16,7 @@ public interface BookingHistoryRepository extends JpaRepository<BookingHistory, 
     @Query("SELECT bh FROM BookingHistory bh WHERE " +
             "(:userId IS NULL OR bh.user.id = :userId) AND " +
             "(:bookingId IS NULL OR bh.booking.id = :bookingId) AND " +
-            "(:action IS NULL OR bh.status = :status) AND " +
+            "(:status IS NULL OR bh.status = :status) AND " +
             "(:dateFrom IS NULL OR bh.timestamp >= :dateFrom) AND " +
             "(:dateTo IS NULL OR bh.timestamp <= :dateTo) " +
             "ORDER BY bh.timestamp DESC")
