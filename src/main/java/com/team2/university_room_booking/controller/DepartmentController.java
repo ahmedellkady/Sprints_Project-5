@@ -19,6 +19,7 @@ public class DepartmentController {
     private final DepartmentService departmentService;
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<DepartmentDto> createDepartment(@Valid @RequestBody CreateDepartmentDto dto) {
         return ResponseEntity.ok(departmentService.createDepartment(dto));
     }
