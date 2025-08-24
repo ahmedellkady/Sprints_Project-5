@@ -16,6 +16,7 @@ import com.team2.university_room_booking.repository.BookingRepository;
 import com.team2.university_room_booking.repository.HolidayRepository;
 import com.team2.university_room_booking.repository.RoomRepository;
 import com.team2.university_room_booking.security.JwtUtil;
+import com.team2.university_room_booking.service.policy.BookingPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +54,9 @@ public class BookingService {
     public Booking createBooking(CreateBookingRequestDto request) {
         // Always validate against holidays first
         checkForHolidayConflicts(request.getStartTime(), request.getEndTime());
+
+        // Validate against policy (horizon and duration)
+        validateAgainstPolicy(request.getStartTime(), request.getEndTime());
 
         // Resolve the room based on the provided parameters
         Room room;
@@ -181,8 +186,9 @@ public class BookingService {
             throw new BadRequestException("Only PENDING bookings can be approved");
         }
 
-        // check if a holiday has been added after booking request
+        // Verify holiday and policy again in case conditions changed since request time
         checkForHolidayConflicts(booking.getStartTime(), booking.getEndTime());
+        validateAgainstPolicy(booking.getStartTime(), booking.getEndTime());
 
         booking.setStatus(BookingStatus.APPROVED);
         bookingRepository.save(booking);
@@ -368,5 +374,42 @@ public class BookingService {
 
         log.warn("auth.resolve failed reason={}", "NOT_DOMAIN_USER");
         throw new InvalidLoginException("Authenticated principal is not a domain User");
+    }
+
+    // --- Policy validation using BookingPolicy ---
+    private void validateAgainstPolicy(LocalDateTime startTime, LocalDateTime endTime) {
+        if (startTime == null || endTime == null) {
+            log.warn("booking.policy.violation reason={} start={} end={}", "NULL_TIME", startTime, endTime);
+            throw new BadRequestException("Start time and end time are required");
+        }
+
+        if (!startTime.isBefore(endTime)) {
+            log.warn("booking.policy.violation reason={} start={} end={}", "INVALID_TIME_ORDER", startTime, endTime);
+            throw new BadRequestException("Start time must be before end time");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // Start must be in the future and within the allowed horizon
+        Duration leadTime = Duration.between(now, startTime);
+        if (leadTime.isNegative() || leadTime.isZero()) {
+            log.warn("booking.policy.violation reason={} start={} now={}", "IN_PAST_OR_NOW", startTime, now);
+            throw new BadRequestException("Booking start time must be in the future");
+        }
+        if (leadTime.compareTo(BookingPolicy.MAX_HORIZON) > 0) {
+            log.warn("booking.policy.violation reason={} start={} now={} leadHours={}", "BEYOND_HORIZON", startTime, now, leadTime.toHours());
+            throw new BadRequestException("Booking cannot be created more than " + BookingPolicy.MAX_HORIZON.toDays() + " days in advance");
+        }
+
+        // Duration must be within min/max
+        Duration duration = Duration.between(startTime, endTime);
+        if (duration.compareTo(BookingPolicy.MIN_DURATION) < 0) {
+            log.warn("booking.policy.violation reason={} durationMinutes={}", "BELOW_MIN_DURATION", duration.toMinutes());
+            throw new BadRequestException("Booking duration must be at least " + BookingPolicy.MIN_DURATION.toHours() + " hour(s)");
+        }
+        if (duration.compareTo(BookingPolicy.MAX_DURATION) > 0) {
+            log.warn("booking.policy.violation reason={} durationMinutes={}", "ABOVE_MAX_DURATION", duration.toMinutes());
+            throw new BadRequestException("Booking duration cannot exceed " + BookingPolicy.MAX_DURATION.toHours() + " hour(s)");
+        }
     }
 }
